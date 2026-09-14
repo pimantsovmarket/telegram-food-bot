@@ -12,9 +12,10 @@ def settings() -> Settings:
 def test_healthcheck_reports_foundation_status():
     async def reachable():
         return True
-    report = asyncio.run(check_health(settings(), reachable))
+    report = asyncio.run(check_health(settings(), reachable, lambda: True))
     assert report.alive and report.config_loaded and report.telegram_configured
     assert report.ozon_configured and report.ozon_reachable and report.database_configured
+    assert report.database_reachable
     assert "ENV:\nSAFE" in report.render()
 
 
