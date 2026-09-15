@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from ..db.models import SyncRun
 from ..db.repositories import ProductRepository, StockRepository, SyncRunRepository
 from ..ozon.client import OzonClient
-from ..ozon.errors import OzonAPIError, OzonResponseError
+from ..ozon.errors import OzonResponseError
 from ..ozon.models import OzonStock
 
 
@@ -90,7 +90,7 @@ async def sync_stocks(
                 raise RuntimeError("Stock sync run was not found")
             SyncRunRepository(session).finish(run, status="success", rows_received=rows)
         return StockSyncResult(sync_run_id=run_id, rows_received=rows)
-    except OzonAPIError as exc:
+    except Exception as exc:
         with session_factory.begin() as session:
             run = session.get(SyncRun, run_id)
             if run is not None:

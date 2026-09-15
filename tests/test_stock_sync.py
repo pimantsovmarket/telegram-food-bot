@@ -90,3 +90,22 @@ def test_ozon_error_records_failed_stock_sync(tmp_path, monkeypatch):
             assert not list(session.scalars(select(Stock)))
     finally:
         database.dispose()
+
+
+def test_unexpected_error_records_failed_stock_sync(tmp_path, monkeypatch):
+    database, cabinet_id = database_with_product(tmp_path, monkeypatch)
+
+    class UnexpectedFailureSource:
+        async def fetch(self, product_ids):
+            raise RuntimeError("unexpected failure")
+
+    try:
+        with pytest.raises(RuntimeError, match="unexpected failure"):
+            asyncio.run(sync_stocks(database.session_factory, cabinet_id, UnexpectedFailureSource()))
+        with database.session_factory() as session:
+            run = session.scalar(select(SyncRun))
+            assert run.status == "failed" and run.rows_received == 0 and run.finished_at is not None
+            assert run.error_message == "unexpected failure"
+            assert not list(session.scalars(select(Stock)))
+    finally:
+        database.dispose()
