@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, ForeignKeyConstraint, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -23,6 +23,7 @@ class Cabinet(Base):
 
     sync_runs: Mapped[list[SyncRun]] = relationship(back_populates="cabinet")
     products: Mapped[list[Product]] = relationship(back_populates="cabinet")
+    stocks: Mapped[list[Stock]] = relationship(back_populates="cabinet")
 
 
 class SyncRun(Base):
@@ -63,3 +64,34 @@ class Product(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
 
     cabinet: Mapped[Cabinet] = relationship(back_populates="products")
+
+
+class Stock(Base):
+    __tablename__ = "stocks"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["cabinet_id", "product_id"],
+            ["products.cabinet_id", "products.product_id"],
+            name="fk_stocks_product",
+        ),
+        UniqueConstraint(
+            "cabinet_id",
+            "product_id",
+            "stock_type",
+            "sku",
+            name="uq_stocks_cabinet_product_type_sku",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cabinet_id: Mapped[int] = mapped_column(ForeignKey("cabinets.id"), nullable=False, index=True)
+    product_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    offer_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    stock_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    sku: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    present: Mapped[int] = mapped_column(Integer, nullable=False)
+    reserved: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+    cabinet: Mapped[Cabinet] = relationship(back_populates="stocks")

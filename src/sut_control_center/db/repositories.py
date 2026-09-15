@@ -3,11 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from ..ozon.models import OzonProduct
-from .models import AppState, Cabinet, Product, SyncRun, utc_now
+from ..ozon.models import OzonProduct, OzonStock
+from .models import AppState, Cabinet, Product, Stock, SyncRun, utc_now
 
 
 class CabinetRepository:
@@ -91,4 +91,48 @@ class ProductRepository:
 
     def list_for_cabinet(self, cabinet_id: int) -> list[Product]:
         statement = select(Product).where(Product.cabinet_id == cabinet_id).order_by(Product.product_id)
+        return list(self.session.scalars(statement))
+
+
+class StockRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def replace_for_products(self, cabinet_id: int, product_ids: list[int], items: list[OzonStock]) -> int:
+        if not product_ids:
+            return 0
+        statement = select(Stock).where(
+            Stock.cabinet_id == cabinet_id,
+            Stock.product_id.in_(product_ids),
+        )
+        existing = {
+            (stock.product_id, stock.stock_type, stock.sku): stock
+            for stock in self.session.scalars(statement)
+        }
+        received_keys = set()
+        for item in items:
+            key = (item.product_id, item.stock_type, item.sku)
+            received_keys.add(key)
+            stock = existing.get(key)
+            if stock is None:
+                stock = Stock(
+                    cabinet_id=cabinet_id,
+                    product_id=item.product_id,
+                    stock_type=item.stock_type,
+                    sku=item.sku,
+                )
+                self.session.add(stock)
+            stock.offer_id = item.offer_id
+            stock.present = item.present
+            stock.reserved = item.reserved
+            stock.updated_at = utc_now()
+
+        stale_ids = [stock.id for key, stock in existing.items() if key not in received_keys]
+        if stale_ids:
+            self.session.execute(delete(Stock).where(Stock.id.in_(stale_ids)))
+        self.session.flush()
+        return len(items)
+
+    def list_for_cabinet(self, cabinet_id: int) -> list[Stock]:
+        statement = select(Stock).where(Stock.cabinet_id == cabinet_id).order_by(Stock.product_id, Stock.stock_type, Stock.sku)
         return list(self.session.scalars(statement))

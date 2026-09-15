@@ -14,3 +14,13 @@ class OzonProduct:
     offer_id: str
     name: str
     is_active: bool
+
+
+@dataclass(frozen=True, slots=True)
+class OzonStock:
+    product_id: int
+    offer_id: str
+    stock_type: str
+    sku: int
+    present: int
+    reserved: int
