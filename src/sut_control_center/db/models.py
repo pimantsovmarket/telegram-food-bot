@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -22,6 +22,7 @@ class Cabinet(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
 
     sync_runs: Mapped[list[SyncRun]] = relationship(back_populates="cabinet")
+    products: Mapped[list[Product]] = relationship(back_populates="cabinet")
 
 
 class SyncRun(Base):
@@ -46,3 +47,19 @@ class AppState(Base):
     key: Mapped[str] = mapped_column(String(255), primary_key=True)
     value_json: Mapped[dict[str, Any] | list[Any] | str | int | float | bool | None] = mapped_column(JSON, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+
+class Product(Base):
+    __tablename__ = "products"
+    __table_args__ = (UniqueConstraint("cabinet_id", "product_id", name="uq_products_cabinet_product"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cabinet_id: Mapped[int] = mapped_column(ForeignKey("cabinets.id"), nullable=False, index=True)
+    product_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    offer_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    name: Mapped[str] = mapped_column(String(500), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+    cabinet: Mapped[Cabinet] = relationship(back_populates="products")

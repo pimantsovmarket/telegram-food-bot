@@ -3,9 +3,11 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from .models import AppState, Cabinet, SyncRun, utc_now
+from ..ozon.models import OzonProduct
+from .models import AppState, Cabinet, Product, SyncRun, utc_now
 
 
 class CabinetRepository:
@@ -59,3 +61,34 @@ class AppStateRepository:
             state.updated_at = utc_now()
         self.session.flush()
         return state
+
+
+class ProductRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def upsert_many(self, cabinet_id: int, items: list[OzonProduct]) -> int:
+        product_ids = [item.product_id for item in items]
+        existing = {}
+        if product_ids:
+            statement = select(Product).where(
+                Product.cabinet_id == cabinet_id,
+                Product.product_id.in_(product_ids),
+            )
+            existing = {product.product_id: product for product in self.session.scalars(statement)}
+
+        for item in items:
+            product = existing.get(item.product_id)
+            if product is None:
+                product = Product(cabinet_id=cabinet_id, product_id=item.product_id)
+                self.session.add(product)
+            product.offer_id = item.offer_id
+            product.name = item.name
+            product.is_active = item.is_active
+            product.updated_at = utc_now()
+        self.session.flush()
+        return len(items)
+
+    def list_for_cabinet(self, cabinet_id: int) -> list[Product]:
+        statement = select(Product).where(Product.cabinet_id == cabinet_id).order_by(Product.product_id)
+        return list(self.session.scalars(statement))
