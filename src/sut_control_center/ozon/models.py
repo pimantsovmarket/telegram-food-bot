@@ -24,3 +24,19 @@ class OzonStock:
     sku: int
     present: int
     reserved: int
+
+
+@dataclass(frozen=True, slots=True)
+class OzonPostingItem:
+    offer_id: str
+    sku: int
+    quantity: int
+
+
+@dataclass(frozen=True, slots=True)
+class OzonPosting:
+    posting_number: str
+    scheme: str
+    status: str
+    event_at: str
+    items: tuple[OzonPostingItem, ...]

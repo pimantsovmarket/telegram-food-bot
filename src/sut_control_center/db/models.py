@@ -24,6 +24,7 @@ class Cabinet(Base):
     sync_runs: Mapped[list[SyncRun]] = relationship(back_populates="cabinet")
     products: Mapped[list[Product]] = relationship(back_populates="cabinet")
     stocks: Mapped[list[Stock]] = relationship(back_populates="cabinet")
+    postings: Mapped[list[Posting]] = relationship(back_populates="cabinet")
 
 
 class SyncRun(Base):
@@ -95,3 +96,48 @@ class Stock(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
 
     cabinet: Mapped[Cabinet] = relationship(back_populates="stocks")
+
+
+class Posting(Base):
+    __tablename__ = "postings"
+    __table_args__ = (
+        UniqueConstraint("cabinet_id", "scheme", "posting_number", name="uq_postings_cabinet_scheme_number"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cabinet_id: Mapped[int] = mapped_column(ForeignKey("cabinets.id"), nullable=False, index=True)
+    posting_number: Mapped[str] = mapped_column(String(255), nullable=False)
+    scheme: Mapped[str] = mapped_column(String(3), nullable=False)
+    status: Mapped[str] = mapped_column(String(100), nullable=False)
+    event_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+    cabinet: Mapped[Cabinet] = relationship(back_populates="postings")
+    items: Mapped[list[PostingItem]] = relationship(back_populates="posting", cascade="all, delete-orphan")
+
+
+class PostingItem(Base):
+    __tablename__ = "posting_items"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["cabinet_id", "product_id"],
+            ["products.cabinet_id", "products.product_id"],
+            name="fk_posting_items_product",
+        ),
+        UniqueConstraint("posting_id", "offer_id", "sku", name="uq_posting_items_posting_offer_sku"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    posting_id: Mapped[int] = mapped_column(ForeignKey("postings.id", ondelete="CASCADE"), nullable=False, index=True)
+    cabinet_id: Mapped[int] = mapped_column(ForeignKey("cabinets.id"), nullable=False, index=True)
+    product_id: Mapped[int | None] = mapped_column(BigInteger)
+    offer_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    sku: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    match_status: Mapped[str] = mapped_column(String(20), nullable=False)
+    match_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+    posting: Mapped[Posting] = relationship(back_populates="items")

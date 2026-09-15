@@ -20,7 +20,7 @@ def test_initial_migration_creates_only_foundation_tables(tmp_path, monkeypatch)
     database = migrated_database(tmp_path, monkeypatch)
     try:
         tables = set(inspect(database.engine).get_table_names())
-        assert tables == {"alembic_version", "app_state", "cabinets", "products", "stocks", "sync_runs"}
+        assert tables == {"alembic_version", "app_state", "cabinets", "posting_items", "postings", "products", "stocks", "sync_runs"}
     finally:
         database.dispose()
 
