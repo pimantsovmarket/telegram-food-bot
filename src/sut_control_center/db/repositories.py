@@ -1,13 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime, time, timezone
 from typing import Any
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from ..ozon.models import OzonPosting, OzonProduct, OzonStock
-from .models import AppState, Cabinet, Posting, PostingItem, Product, Stock, SyncRun, utc_now
+from .models import AppState, Cabinet, Posting, PostingItem, Product, ProductReplenishmentParameters, Stock, SyncRun, utc_now
 
 
 class CabinetRepository:
@@ -95,6 +95,84 @@ class ProductRepository:
     def list_for_cabinet(self, cabinet_id: int) -> list[Product]:
         statement = select(Product).where(Product.cabinet_id == cabinet_id).order_by(Product.product_id)
         return list(self.session.scalars(statement))
+
+
+class ProductReplenishmentParametersRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    @staticmethod
+    def _at(value: date | datetime) -> datetime:
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                return value.replace(tzinfo=timezone.utc)
+            return value.astimezone(timezone.utc)
+        return datetime.combine(value, time.min, timezone.utc)
+
+    def get_effective(
+        self,
+        cabinet_id: int,
+        product_id: int,
+        at: date | datetime,
+    ) -> ProductReplenishmentParameters | None:
+        moment = self._at(at)
+        statement = (
+            select(ProductReplenishmentParameters)
+            .where(
+                ProductReplenishmentParameters.cabinet_id == cabinet_id,
+                ProductReplenishmentParameters.product_id == product_id,
+                ProductReplenishmentParameters.effective_from <= moment,
+                (
+                    ProductReplenishmentParameters.effective_to.is_(None)
+                    | (ProductReplenishmentParameters.effective_to > moment)
+                ),
+            )
+            .order_by(ProductReplenishmentParameters.effective_from.desc())
+        )
+        return self.session.scalar(statement)
+
+    def set_parameters(
+        self,
+        cabinet_id: int,
+        product_id: int,
+        lead_time_days: int,
+        safety_stock_days: int,
+        effective_from: date | datetime,
+    ) -> ProductReplenishmentParameters:
+        if lead_time_days < 0:
+            raise ValueError("lead_time_days must be non-negative")
+        if safety_stock_days < 0:
+            raise ValueError("safety_stock_days must be non-negative")
+        starts_at = self._at(effective_from)
+        active_statement = (
+            select(ProductReplenishmentParameters)
+            .where(
+                ProductReplenishmentParameters.cabinet_id == cabinet_id,
+                ProductReplenishmentParameters.product_id == product_id,
+                ProductReplenishmentParameters.effective_to.is_(None),
+            )
+            .with_for_update()
+        )
+        active = self.session.scalar(active_statement)
+        if active is not None:
+            active_start = active.effective_from
+            if active_start.tzinfo is None:
+                active_start = active_start.replace(tzinfo=timezone.utc)
+            if starts_at <= active_start:
+                raise ValueError("effective_from must be later than the active version")
+            active.effective_to = starts_at
+            self.session.flush()
+
+        parameters = ProductReplenishmentParameters(
+            cabinet_id=cabinet_id,
+            product_id=product_id,
+            lead_time_days=lead_time_days,
+            safety_stock_days=safety_stock_days,
+            effective_from=starts_at,
+        )
+        self.session.add(parameters)
+        self.session.flush()
+        return parameters
 
 
 class StockRepository:

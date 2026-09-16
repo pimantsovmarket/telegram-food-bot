@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, ForeignKey, ForeignKeyConstraint, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -69,6 +69,45 @@ class Product(Base):
 
     cabinet: Mapped[Cabinet] = relationship(back_populates="products")
 
+
+class ProductReplenishmentParameters(Base):
+    __tablename__ = "product_replenishment_parameters"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["cabinet_id", "product_id"],
+            ["products.cabinet_id", "products.product_id"],
+            name="fk_replenishment_parameters_product",
+        ),
+        CheckConstraint("lead_time_days >= 0", name="ck_replenishment_lead_time_nonnegative"),
+        CheckConstraint("safety_stock_days >= 0", name="ck_replenishment_safety_stock_nonnegative"),
+        CheckConstraint(
+            "effective_to IS NULL OR effective_to > effective_from",
+            name="ck_replenishment_effective_interval",
+        ),
+        Index(
+            "ix_replenishment_parameters_product_effective",
+            "cabinet_id",
+            "product_id",
+            "effective_from",
+        ),
+        Index(
+            "uq_replenishment_parameters_active",
+            "cabinet_id",
+            "product_id",
+            unique=True,
+            sqlite_where=text("effective_to IS NULL"),
+            postgresql_where=text("effective_to IS NULL"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    cabinet_id: Mapped[int] = mapped_column(ForeignKey("cabinets.id"), nullable=False)
+    product_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    lead_time_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    safety_stock_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
 
 class Stock(Base):
     __tablename__ = "stocks"
