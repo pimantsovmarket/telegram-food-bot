@@ -19,6 +19,9 @@ class ProductSyncResult:
 
 
 class ProductCatalogSource:
+    SIZE_ATTRIBUTE_IDS = (4295, 9533)
+    COLOR_ATTRIBUTE_IDS = (10096,)
+
     def __init__(self, client: OzonClient, *, page_size: int = 1000) -> None:
         self.client = client
         self.page_size = page_size
@@ -51,19 +54,72 @@ class ProductCatalogSource:
         details = response.data.get("items")
         if not isinstance(details, list):
             raise OzonResponseError("Ozon product info list has an unexpected structure")
+        attributes = await self._fetch_attributes(product_ids)
         normalized = []
         for item in details:
             if not isinstance(item, dict) or item.get("id") is None:
                 continue
+            product_id = int(item["id"])
+            variant = attributes.get(product_id, {})
             normalized.append(
                 OzonProduct(
-                    product_id=int(item["id"]),
+                    product_id=product_id,
                     offer_id=str(item.get("offer_id") or ""),
                     name=str(item.get("name") or item.get("offer_id") or item["id"]),
                     is_active=not bool(item.get("is_archived") or item.get("is_autoarchived")),
+                    sku=variant.get("sku"),
+                    size=variant.get("size"),
+                    color=variant.get("color"),
                 )
             )
         return normalized
+
+    async def _fetch_attributes(self, product_ids: list[int]) -> dict[int, dict[str, int | str | None]]:
+        response = await self.client.post(
+            "/v4/product/info/attributes",
+            json={
+                "filter": {"product_id": [str(product_id) for product_id in product_ids], "visibility": "ALL"},
+                "limit": min(self.page_size, 1000),
+                "sort_dir": "ASC",
+            },
+        )
+        payload = response.data.get("result", response.data.get("items"))
+        if isinstance(payload, dict):
+            payload = payload.get("items")
+        if not isinstance(payload, list):
+            raise OzonResponseError("Ozon product attributes response has an unexpected structure")
+
+        result = {}
+        for item in payload:
+            if not isinstance(item, dict) or item.get("id") is None:
+                continue
+            sku = item.get("sku")
+            result[int(item["id"])] = {
+                "sku": int(sku) if sku not in (None, "") else None,
+                "size": self._attribute_value(item, self.SIZE_ATTRIBUTE_IDS),
+                "color": self._attribute_value(item, self.COLOR_ATTRIBUTE_IDS),
+            }
+        return result
+
+    @staticmethod
+    def _attribute_value(item: dict[str, Any], attribute_ids: tuple[int, ...]) -> str | None:
+        attributes = item.get("attributes")
+        if not isinstance(attributes, list):
+            return None
+        by_id = {
+            int(attribute.get("id") or attribute.get("attribute_id")): attribute
+            for attribute in attributes
+            if isinstance(attribute, dict) and (attribute.get("id") is not None or attribute.get("attribute_id") is not None)
+        }
+        for attribute_id in attribute_ids:
+            attribute = by_id.get(attribute_id)
+            values = attribute.get("values") if attribute else None
+            if not isinstance(values, list):
+                continue
+            for value in values:
+                if isinstance(value, dict) and value.get("value") not in (None, ""):
+                    return str(value["value"])
+        return None
 
 
 async def sync_products(

@@ -84,6 +84,9 @@ class ProductRepository:
                 self.session.add(product)
             product.offer_id = item.offer_id
             product.name = item.name
+            product.sku = item.sku
+            product.size = item.size
+            product.color = item.color
             product.is_active = item.is_active
             product.updated_at = utc_now()
         self.session.flush()

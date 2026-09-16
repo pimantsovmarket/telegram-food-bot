@@ -21,6 +21,8 @@ def test_initial_migration_creates_only_foundation_tables(tmp_path, monkeypatch)
     try:
         tables = set(inspect(database.engine).get_table_names())
         assert tables == {"alembic_version", "app_state", "cabinets", "posting_items", "postings", "products", "stocks", "sync_runs"}
+        product_columns = {column["name"] for column in inspect(database.engine).get_columns("products")}
+        assert {"sku", "size", "color"} <= product_columns
     finally:
         database.dispose()
 

@@ -30,6 +30,23 @@ def catalog_handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, json={"result": {"items": [{"product_id": 101, "offer_id": "A-1"}], "last_id": ""}})
     if request.url.path == "/v3/product/info/list":
         return httpx.Response(200, json={"items": [{"id": 101, "offer_id": "A-1", "name": "Product A", "is_archived": False}]})
+    if request.url.path == "/v4/product/info/attributes":
+        return httpx.Response(
+            200,
+            json={
+                "result": [
+                    {
+                        "id": 101,
+                        "sku": 501,
+                        "attributes": [
+                            {"id": 4295, "values": [{"value": "42"}]},
+                            {"id": 9533, "values": [{"value": "S"}]},
+                            {"id": 10096, "values": [{"value": "burgundy"}]},
+                        ],
+                    }
+                ]
+            },
+        )
     raise AssertionError(f"Unexpected path: {request.url.path}")
 
 
@@ -45,7 +62,9 @@ def test_successful_product_sync(tmp_path, monkeypatch):
         with database.session_factory() as session:
             products = list(session.scalars(select(Product)))
             run = session.get(SyncRun, result.sync_run_id)
-            assert [(item.product_id, item.offer_id, item.name) for item in products] == [(101, "A-1", "Product A")]
+            assert [(item.product_id, item.offer_id, item.name, item.sku, item.size, item.color) for item in products] == [
+                (101, "A-1", "Product A", 501, "42", "burgundy")
+            ]
             assert run.status == "success" and run.rows_received == 1 and run.finished_at is not None
     finally:
         database.dispose()
@@ -59,6 +78,27 @@ def test_repeated_sync_updates_without_duplicates(tmp_path, monkeypatch):
         with database.session_factory() as session:
             assert len(list(session.scalars(select(Product)))) == 1
             assert len(list(session.scalars(select(SyncRun)))) == 2
+    finally:
+        database.dispose()
+
+
+def test_missing_optional_variant_attributes_are_allowed(tmp_path, monkeypatch):
+    database, cabinet_id = database_with_cabinet(tmp_path, monkeypatch)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/v3/product/list":
+            return httpx.Response(200, json={"result": {"items": [{"product_id": 101}], "last_id": ""}})
+        if request.url.path == "/v3/product/info/list":
+            return httpx.Response(200, json={"items": [{"id": 101, "offer_id": "A-1", "name": "Product A"}]})
+        if request.url.path == "/v4/product/info/attributes":
+            return httpx.Response(200, json={"result": [{"id": 101, "attributes": []}]})
+        raise AssertionError(f"Unexpected path: {request.url.path}")
+
+    try:
+        asyncio.run(sync_products(database.session_factory, cabinet_id, source(handler)))
+        with database.session_factory() as session:
+            product = session.scalar(select(Product))
+            assert product.sku is None and product.size is None and product.color is None
     finally:
         database.dispose()
 

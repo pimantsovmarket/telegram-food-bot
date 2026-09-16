@@ -14,6 +14,9 @@ class OzonProduct:
     offer_id: str
     name: str
     is_active: bool
+    sku: int | None = None
+    size: str | None = None
+    color: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
