@@ -12,6 +12,10 @@ from ..db.models import Posting, PostingItem, Product, Stock
 @dataclass(frozen=True, slots=True)
 class ProductStockAnalytics:
     product_id: int
+    offer_id: str
+    sku: int | None
+    size: str | None
+    color: str | None
     current_stock: int
     delivered_units_7d: int
     delivered_units_14d: int
@@ -81,6 +85,10 @@ def calculate_stock_analytics(
     statement = (
         select(
             Product.product_id,
+            Product.offer_id,
+            Product.sku,
+            Product.size,
+            Product.color,
             func.coalesce(stock_totals.c.current_stock, 0),
             func.coalesce(sales_totals.c.units_7d, 0),
             func.coalesce(sales_totals.c.units_14d, 0),
@@ -101,7 +109,7 @@ def calculate_stock_analytics(
     )
 
     analytics = []
-    for product_id, current_stock, units_7d, units_14d, units_30d in session.execute(statement):
+    for product_id, offer_id, sku, size, color, current_stock, units_7d, units_14d, units_30d in session.execute(statement):
         current_stock = int(current_stock)
         units_7d = int(units_7d)
         units_14d = int(units_14d)
@@ -112,6 +120,10 @@ def calculate_stock_analytics(
         analytics.append(
             ProductStockAnalytics(
                 product_id=int(product_id),
+                offer_id=offer_id,
+                sku=sku,
+                size=size,
+                color=color,
                 current_stock=current_stock,
                 delivered_units_7d=units_7d,
                 delivered_units_14d=units_14d,

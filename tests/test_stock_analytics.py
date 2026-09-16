@@ -21,7 +21,16 @@ def analytics_database(tmp_path: Path):
         cabinet_id = CabinetRepository(session).add("Primary").id
         session.add_all(
             [
-                Product(cabinet_id=cabinet_id, product_id=101, offer_id="A", name="Active", is_active=True),
+                Product(
+                    cabinet_id=cabinet_id,
+                    product_id=101,
+                    offer_id="A",
+                    name="Active",
+                    sku=1,
+                    size="42",
+                    color="burgundy",
+                    is_active=True,
+                ),
                 Product(cabinet_id=cabinet_id, product_id=102, offer_id="B", name="No sales", is_active=True),
                 Product(cabinet_id=cabinet_id, product_id=103, offer_id="C", name="No stock", is_active=True),
             ]
@@ -70,6 +79,7 @@ def test_calculates_7_14_and_30_day_windows(tmp_path):
     try:
         with database.session_factory() as session:
             result = calculate_stock_analytics(session, cabinet_id, as_of=AS_OF)[0]
+        assert (result.offer_id, result.sku, result.size, result.color) == ("A", 1, "42", "burgundy")
         assert result.current_stock == 20
         assert (result.delivered_units_7d, result.delivered_units_14d, result.delivered_units_30d) == (7, 14, 29)
         assert result.avg_sales_per_day_7d == pytest.approx(1)
