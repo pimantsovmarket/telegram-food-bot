@@ -26,6 +26,7 @@ class Cabinet(Base):
     products: Mapped[list[Product]] = relationship(back_populates="cabinet")
     stocks: Mapped[list[Stock]] = relationship(back_populates="cabinet")
     postings: Mapped[list[Posting]] = relationship(back_populates="cabinet")
+    returns: Mapped[list[Return]] = relationship(back_populates="cabinet")
 
 
 class SyncRun(Base):
@@ -245,3 +246,42 @@ class FinanceAccrualComponent(Base):
     type_id: Mapped[int] = mapped_column(Integer, nullable=False)
     amount: Mapped[Decimal] = mapped_column(Numeric(19, 6), nullable=False)
     currency: Mapped[str] = mapped_column(String(3), nullable=False)
+
+
+class Return(Base):
+    __tablename__ = "returns"
+    __table_args__ = (
+        UniqueConstraint("cabinet_id", "return_id", name="uq_returns_cabinet_return"),
+        ForeignKeyConstraint(
+            ["cabinet_id", "product_id"],
+            ["products.cabinet_id", "products.product_id"],
+            name="fk_returns_product",
+        ),
+        Index("ix_returns_cabinet_schema", "cabinet_id", "schema"),
+        Index("ix_returns_posting_number", "posting_number"),
+        Index("ix_returns_sku", "sku"),
+    )
+
+    return_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    cabinet_id: Mapped[int] = mapped_column(ForeignKey("cabinets.id"), primary_key=True, autoincrement=False)
+    source_id: Mapped[int | None] = mapped_column(BigInteger)
+    schema: Mapped[str] = mapped_column(String(10), nullable=False)
+    type: Mapped[str] = mapped_column(String(50), nullable=False)
+    order_id: Mapped[int | None] = mapped_column(BigInteger)
+    order_number: Mapped[str | None] = mapped_column(String(255))
+    posting_number: Mapped[str | None] = mapped_column(String(255))
+    sku: Mapped[int | None] = mapped_column(BigInteger)
+    offer_id: Mapped[str | None] = mapped_column(String(255))
+    product_id: Mapped[int | None] = mapped_column(BigInteger)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    reason: Mapped[str | None] = mapped_column(Text)
+    status_id: Mapped[int | None] = mapped_column(Integer)
+    status_code: Mapped[str | None] = mapped_column(String(100))
+    status_name: Mapped[str | None] = mapped_column(String(255))
+    status_changed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    return_date: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    final_moment: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+    cabinet: Mapped[Cabinet] = relationship(back_populates="returns")

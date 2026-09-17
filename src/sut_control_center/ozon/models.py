@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -86,3 +86,24 @@ class OzonFinanceAccrual:
     currency: str
     items: tuple[OzonFinanceAccrualItem, ...]
     components: tuple[OzonFinanceAccrualComponent, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class OzonReturn:
+    return_id: int
+    source_id: int | None
+    schema: str
+    type: str
+    order_id: int | None
+    order_number: str | None
+    posting_number: str | None
+    sku: int | None
+    offer_id: str | None
+    quantity: int
+    reason: str | None
+    status_id: int | None
+    status_code: str | None
+    status_name: str | None
+    status_changed_at: datetime | None
+    return_date: datetime | None
+    final_moment: datetime | None

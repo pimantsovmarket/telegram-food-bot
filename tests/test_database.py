@@ -32,6 +32,7 @@ def test_initial_migration_creates_only_foundation_tables(tmp_path, monkeypatch)
             "postings",
             "product_replenishment_parameters",
             "products",
+            "returns",
             "stocks",
             "sync_runs",
         }

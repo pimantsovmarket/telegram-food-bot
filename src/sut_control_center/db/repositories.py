@@ -6,7 +6,7 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from ..ozon.models import OzonFinanceAccrual, OzonFinanceAccrualType, OzonPosting, OzonProduct, OzonStock
+from ..ozon.models import OzonFinanceAccrual, OzonFinanceAccrualType, OzonPosting, OzonProduct, OzonReturn, OzonStock
 from .models import (
     AppState,
     Cabinet,
@@ -18,6 +18,7 @@ from .models import (
     PostingItem,
     Product,
     ProductReplenishmentParameters,
+    Return,
     Stock,
     SyncRun,
     utc_now,
@@ -393,3 +394,60 @@ class FinanceAccrualRepository:
                 component_count += 1
         self.session.flush()
         return len(items), item_count, component_count
+
+
+class ReturnRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def upsert_many(self, cabinet_id: int, items: list[OzonReturn]) -> tuple[int, int]:
+        return_ids = [item.return_id for item in items]
+        existing = {}
+        if return_ids:
+            existing = {
+                item.return_id: item
+                for item in self.session.scalars(
+                    select(Return).where(Return.cabinet_id == cabinet_id, Return.return_id.in_(return_ids))
+                )
+            }
+
+        products = list(self.session.scalars(select(Product).where(Product.cabinet_id == cabinet_id)))
+        sku_matches: dict[int, list[int]] = {}
+        offer_matches: dict[str, list[int]] = {}
+        for product in products:
+            if product.sku is not None:
+                sku_matches.setdefault(product.sku, []).append(product.product_id)
+            offer_matches.setdefault(product.offer_id, []).append(product.product_id)
+
+        linked = 0
+        for source in items:
+            item = existing.get(source.return_id)
+            if item is None:
+                item = Return(return_id=source.return_id, cabinet_id=cabinet_id)
+                self.session.add(item)
+            product_id = None
+            if source.sku is not None and len(sku_matches.get(source.sku, [])) == 1:
+                product_id = sku_matches[source.sku][0]
+            elif source.offer_id is not None and len(offer_matches.get(source.offer_id, [])) == 1:
+                product_id = offer_matches[source.offer_id][0]
+            item.source_id = source.source_id
+            item.schema = source.schema
+            item.type = source.type
+            item.order_id = source.order_id
+            item.order_number = source.order_number
+            item.posting_number = source.posting_number
+            item.sku = source.sku
+            item.offer_id = source.offer_id
+            item.product_id = product_id
+            item.quantity = source.quantity
+            item.reason = source.reason
+            item.status_id = source.status_id
+            item.status_code = source.status_code
+            item.status_name = source.status_name
+            item.status_changed_at = source.status_changed_at
+            item.return_date = source.return_date
+            item.final_moment = source.final_moment
+            item.updated_at = utc_now()
+            linked += int(product_id is not None)
+        self.session.flush()
+        return len(items), linked
