@@ -75,6 +75,10 @@ class ProductCabinetAnalytics:
     cancelled_units: int
     return_units: int
     current_stock: int
+    size: str | None = None
+    delivered_units_fbo: int = 0
+    delivered_units_fbs: int = 0
+    delivered_units_total: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -95,6 +99,9 @@ class CabinetAnalytics:
     other_services: Decimal
     product_breakdown: tuple[ProductCabinetAnalytics, ...]
     unlinked_returns: int
+    delivered_units_fbo: int = 0
+    delivered_units_fbs: int = 0
+    delivered_units_total: int = 0
 
 
 def _decimal(value: Decimal | None) -> Decimal:
@@ -116,6 +123,7 @@ def calculate_cabinet_analytics(
         select(
             PostingItem.product_id,
             Posting.status,
+            Posting.scheme,
             func.sum(PostingItem.quantity),
         )
         .join(Posting, Posting.id == PostingItem.posting_id)
@@ -125,18 +133,32 @@ def calculate_cabinet_analytics(
             Posting.event_at < end_at,
             Posting.status.in_(("delivered", "cancelled")),
         )
-        .group_by(PostingItem.product_id, Posting.status)
+        .group_by(PostingItem.product_id, Posting.status, Posting.scheme)
     )
     delivered_by_product: dict[int, int] = {}
+    delivered_fbo_by_product: dict[int, int] = {}
+    delivered_fbs_by_product: dict[int, int] = {}
     cancelled_by_product: dict[int, int] = {}
     delivered_units = 0
+    delivered_units_fbo = 0
+    delivered_units_fbs = 0
     cancelled_units = 0
-    for product_id, status, quantity in posting_rows:
+    for product_id, status, scheme, quantity in posting_rows:
         units = int(quantity or 0)
         if status == "delivered":
             delivered_units += units
+            normalized_scheme = str(scheme).upper()
+            if normalized_scheme == "FBO":
+                delivered_units_fbo += units
+            elif normalized_scheme == "FBS":
+                delivered_units_fbs += units
             if product_id is not None:
-                delivered_by_product[int(product_id)] = delivered_by_product.get(int(product_id), 0) + units
+                product_key = int(product_id)
+                delivered_by_product[product_key] = delivered_by_product.get(product_key, 0) + units
+                if normalized_scheme == "FBO":
+                    delivered_fbo_by_product[product_key] = delivered_fbo_by_product.get(product_key, 0) + units
+                elif normalized_scheme == "FBS":
+                    delivered_fbs_by_product[product_key] = delivered_fbs_by_product.get(product_key, 0) + units
         else:
             cancelled_units += units
             if product_id is not None:
@@ -211,7 +233,7 @@ def calculate_cabinet_analytics(
         component_totals[bucket] += _decimal(amount)
 
     products = session.execute(
-        select(Product.product_id, Product.sku)
+        select(Product.product_id, Product.sku, Product.size)
         .where(Product.cabinet_id == cabinet_id)
         .order_by(Product.product_id)
     )
@@ -223,8 +245,12 @@ def calculate_cabinet_analytics(
             cancelled_units=cancelled_by_product.get(int(product_id), 0),
             return_units=returns_by_product.get(int(product_id), 0),
             current_stock=stock_by_product.get(int(product_id), 0),
+            size=size,
+            delivered_units_fbo=delivered_fbo_by_product.get(int(product_id), 0),
+            delivered_units_fbs=delivered_fbs_by_product.get(int(product_id), 0),
+            delivered_units_total=delivered_by_product.get(int(product_id), 0),
         )
-        for product_id, sku in products
+        for product_id, sku, size in products
     )
 
     return CabinetAnalytics(
@@ -244,4 +270,7 @@ def calculate_cabinet_analytics(
         other_services=component_totals["other"],
         product_breakdown=breakdown,
         unlinked_returns=unlinked_returns,
+        delivered_units_fbo=delivered_units_fbo,
+        delivered_units_fbs=delivered_units_fbs,
+        delivered_units_total=delivered_units,
     )

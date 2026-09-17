@@ -35,16 +35,18 @@ def populated_database(tmp_path: Path, monkeypatch):
     with database.session_factory.begin() as session:
         cabinet_id = CabinetRepository(session).add("Primary").id
         session.add_all([
-            Product(cabinet_id=cabinet_id, product_id=101, offer_id="A", name="A", sku=501),
-            Product(cabinet_id=cabinet_id, product_id=102, offer_id="B", name="B", sku=502),
+            Product(cabinet_id=cabinet_id, product_id=101, offer_id="A", name="A", sku=501, size="M"),
+            Product(cabinet_id=cabinet_id, product_id=102, offer_id="B", name="B", sku=502, size="L"),
         ])
         session.flush()
         delivered = Posting(cabinet_id=cabinet_id, posting_number="D", scheme="FBO", status="delivered", event_at=at)
+        delivered_fbs = Posting(cabinet_id=cabinet_id, posting_number="D-FBS", scheme="FBS", status="delivered", event_at=at)
         cancelled = Posting(cabinet_id=cabinet_id, posting_number="C", scheme="FBO", status="cancelled", event_at=at)
-        session.add_all([delivered, cancelled])
+        session.add_all([delivered, delivered_fbs, cancelled])
         session.flush()
         session.add_all([
             PostingItem(posting_id=delivered.id, cabinet_id=cabinet_id, product_id=101, offer_id="A", sku=501, quantity=3, match_status="matched"),
+            PostingItem(posting_id=delivered_fbs.id, cabinet_id=cabinet_id, product_id=102, offer_id="B", sku=502, quantity=2, match_status="matched"),
             PostingItem(posting_id=cancelled.id, cabinet_id=cabinet_id, product_id=102, offer_id="B", sku=502, quantity=2, match_status="matched"),
             Stock(cabinet_id=cabinet_id, product_id=101, offer_id="A", stock_type="fbo", sku=501, present=10, reserved=2),
             Stock(cabinet_id=cabinet_id, product_id=102, offer_id="B", stock_type="fbo", sku=502, present=1, reserved=3),
@@ -76,7 +78,11 @@ def test_cabinet_analytics_uses_distinct_sources_and_no_double_counting(tmp_path
     try:
         with database.session_factory() as session:
             result = calculate_cabinet_analytics(session, cabinet_id, START, END)
-        assert result.delivered_units == 3
+        assert result.delivered_units == 5
+        assert result.delivered_units_fbo == 3
+        assert result.delivered_units_fbs == 2
+        assert result.delivered_units_total == 5
+        assert result.delivered_units_fbo + result.delivered_units_fbs == result.delivered_units_total
         assert result.cancelled_units == 2
         assert result.client_return_units == 1
         assert result.full_return_units == 2
@@ -89,9 +95,9 @@ def test_cabinet_analytics_uses_distinct_sources_and_no_double_counting(tmp_path
         assert result.return_logistics == Decimal("-10")
         assert result.storage == Decimal("-5")
         assert result.other_services == Decimal("-3")
-        assert [(row.product_id, row.delivered_units, row.cancelled_units, row.return_units, row.current_stock) for row in result.product_breakdown] == [
-            (101, 3, 0, 1, 8),
-            (102, 0, 2, 0, 0),
+        assert [(row.product_id, row.size, row.delivered_units_fbo, row.delivered_units_fbs, row.delivered_units_total, row.cancelled_units, row.return_units, row.current_stock) for row in result.product_breakdown] == [
+            (101, "M", 3, 0, 3, 0, 1, 8),
+            (102, "L", 0, 2, 2, 2, 0, 0),
         ]
     finally:
         database.dispose()
@@ -115,5 +121,25 @@ def test_cabinet_analytics_rejects_invalid_period(tmp_path, monkeypatch):
     try:
         with database.session_factory() as session, pytest.raises(ValueError):
             calculate_cabinet_analytics(session, cabinet_id, END, START)
+    finally:
+        database.dispose()
+
+
+def test_cabinet_analytics_does_not_mix_cabinets(tmp_path, monkeypatch):
+    database, cabinet_id = populated_database(tmp_path, monkeypatch)
+    try:
+        at = datetime(2026, 9, 10, tzinfo=timezone.utc)
+        with database.session_factory.begin() as session:
+            other_id = CabinetRepository(session).add("Other").id
+            session.add(Product(cabinet_id=other_id, product_id=201, offer_id="X", name="X", sku=601))
+            session.flush()
+            posting = Posting(cabinet_id=other_id, posting_number="OTHER", scheme="FBO", status="delivered", event_at=at)
+            session.add(posting)
+            session.flush()
+            session.add(PostingItem(posting_id=posting.id, cabinet_id=other_id, product_id=201, offer_id="X", sku=601, quantity=99, match_status="matched"))
+        with database.session_factory() as session:
+            result = calculate_cabinet_analytics(session, cabinet_id, START, END)
+        assert result.delivered_units_total == 5
+        assert all(row.product_id != 201 for row in result.product_breakdown)
     finally:
         database.dispose()
