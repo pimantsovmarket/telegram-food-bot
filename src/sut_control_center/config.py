@@ -31,6 +31,9 @@ class Settings:
     database_url: str
     log_level: str = "INFO"
     stock_sync_interval_minutes: int = 15
+    sales_sync_interval_minutes: int = 15
+    returns_sync_interval_minutes: int = 30
+    finance_sync_interval_minutes: int = 60
 
     @classmethod
     def from_env(cls, *, load_env_file: bool = True) -> "Settings":
@@ -39,12 +42,20 @@ class Settings:
         level = os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO"
         if level not in {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"}:
             raise ConfigError("LOG_LEVEL is invalid")
-        try:
-            stock_sync_interval = int(os.getenv("STOCK_SYNC_INTERVAL_MINUTES", "15").strip() or "15")
-        except ValueError as exc:
-            raise ConfigError("STOCK_SYNC_INTERVAL_MINUTES must be an integer") from exc
-        if stock_sync_interval <= 0:
-            raise ConfigError("STOCK_SYNC_INTERVAL_MINUTES must be positive")
+        intervals = {}
+        for name, default in (
+            ("STOCK_SYNC_INTERVAL_MINUTES", 15),
+            ("SALES_SYNC_INTERVAL_MINUTES", 15),
+            ("RETURNS_SYNC_INTERVAL_MINUTES", 30),
+            ("FINANCE_SYNC_INTERVAL_MINUTES", 60),
+        ):
+            try:
+                value = int(os.getenv(name, str(default)).strip() or str(default))
+            except ValueError as exc:
+                raise ConfigError(f"{name} must be an integer") from exc
+            if value <= 0:
+                raise ConfigError(f"{name} must be positive")
+            intervals[name] = value
         return cls(
             telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", "").strip(),
             owner_telegram_ids=_owner_ids(os.getenv("OWNER_TELEGRAM_IDS", "")),
@@ -52,7 +63,10 @@ class Settings:
             ozon_api_key=os.getenv("OZON_API_KEY", "").strip(),
             database_url=os.getenv("DATABASE_URL", "").strip(),
             log_level=level,
-            stock_sync_interval_minutes=stock_sync_interval,
+            stock_sync_interval_minutes=intervals["STOCK_SYNC_INTERVAL_MINUTES"],
+            sales_sync_interval_minutes=intervals["SALES_SYNC_INTERVAL_MINUTES"],
+            returns_sync_interval_minutes=intervals["RETURNS_SYNC_INTERVAL_MINUTES"],
+            finance_sync_interval_minutes=intervals["FINANCE_SYNC_INTERVAL_MINUTES"],
         )
 
     @property

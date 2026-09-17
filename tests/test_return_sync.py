@@ -1,4 +1,5 @@
 import asyncio
+from datetime import date
 import json
 from pathlib import Path
 
@@ -127,3 +128,19 @@ def test_return_api_error_records_failed_sync_run(tmp_path, monkeypatch):
             assert session.scalar(select(func.count()).select_from(Return)) == 0
     finally:
         database.dispose()
+
+
+def test_return_source_applies_status_change_overlap_window():
+    requests = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        requests.append(body)
+        return httpx.Response(200, json={"returns": [], "has_next": False})
+
+    asyncio.run(source(handler).fetch(date(2026, 8, 19), date(2026, 9, 17)))
+    assert len(requests) == 2
+    for body in requests:
+        window = body["filter"]["visual_status_change_moment"]
+        assert window["time_from"] == "2026-08-19T00:00:00Z"
+        assert window["time_to"].startswith("2026-09-17T23:59:59.999999")

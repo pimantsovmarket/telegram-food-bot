@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime, time, timezone
 from typing import Any
 
 from sqlalchemy.orm import Session, sessionmaker
@@ -29,19 +29,33 @@ class ReturnSource:
         self.client = client
         self.page_size = page_size
 
-    async def fetch(self) -> tuple[list[OzonReturn], int, int]:
-        fbo = await self._fetch_schema("FBO")
-        fbs = await self._fetch_schema("FBS")
+    async def fetch(
+        self, period_start: date | None = None, period_end: date | None = None
+    ) -> tuple[list[OzonReturn], int, int]:
+        if (period_start is None) != (period_end is None):
+            raise ValueError("Return sync period must include both start and end")
+        if period_start is not None and period_end is not None and period_end < period_start:
+            raise ValueError("Return sync period is invalid")
+        fbo = await self._fetch_schema("FBO", period_start, period_end)
+        fbs = await self._fetch_schema("FBS", period_start, period_end)
         merged = {item.return_id: item for item in (*fbo, *fbs)}
         return list(merged.values()), len(fbo), len(fbs)
 
-    async def _fetch_schema(self, schema: str) -> list[OzonReturn]:
+    async def _fetch_schema(
+        self, schema: str, period_start: date | None, period_end: date | None
+    ) -> list[OzonReturn]:
         last_id = 0
         result: list[OzonReturn] = []
         while True:
+            filters: dict[str, Any] = {"return_schema": schema}
+            if period_start is not None and period_end is not None:
+                filters["visual_status_change_moment"] = {
+                    "time_from": datetime.combine(period_start, time.min, timezone.utc).isoformat().replace("+00:00", "Z"),
+                    "time_to": datetime.combine(period_end, time.max, timezone.utc).isoformat().replace("+00:00", "Z"),
+                }
             response = await self.client.post(
                 "/v1/returns/list",
-                json={"filter": {"return_schema": schema}, "limit": self.page_size, "last_id": last_id},
+                json={"filter": filters, "limit": self.page_size, "last_id": last_id},
             )
             entries = response.data.get("returns")
             if not isinstance(entries, list):
@@ -105,13 +119,17 @@ class ReturnSource:
 
 
 async def sync_returns(
-    session_factory: sessionmaker[Session], cabinet_id: int, source: ReturnSource
+    session_factory: sessionmaker[Session],
+    cabinet_id: int,
+    source: ReturnSource,
+    period_start: date | None = None,
+    period_end: date | None = None,
 ) -> ReturnSyncResult:
     with session_factory.begin() as session:
         run = SyncRunRepository(session).start(cabinet_id, "ozon_returns", "returns")
         run_id = run.id
     try:
-        items, fbo_received, fbs_received = await source.fetch()
+        items, fbo_received, fbs_received = await source.fetch(period_start, period_end)
         with session_factory.begin() as session:
             total_saved, linked = ReturnRepository(session).upsert_many(cabinet_id, items)
             run = session.get(SyncRun, run_id)

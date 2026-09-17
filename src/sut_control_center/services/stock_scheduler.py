@@ -6,71 +6,77 @@ from collections.abc import Awaitable, Callable
 from contextlib import suppress
 from typing import Any
 
-from sqlalchemy.orm import Session, sessionmaker
-
-from .stock_sync import StockCatalogSource, StockSyncResult, sync_stocks
-
-
 logger = logging.getLogger(__name__)
-StockSyncRunner = Callable[
-    [sessionmaker[Session], int, StockCatalogSource],
-    Awaitable[StockSyncResult],
-]
+SyncJob = Callable[[], Awaitable[Any]]
+JOB_ORDER = ("stocks", "postings", "returns", "finance")
 
 
-class StockSyncScheduler:
+class DataSyncScheduler:
     def __init__(
         self,
-        session_factory: sessionmaker[Session],
-        cabinet_id: int,
-        source: StockCatalogSource,
+        jobs: dict[str, SyncJob],
         *,
-        interval_minutes: float = 15,
-        runner: StockSyncRunner = sync_stocks,
+        stock_interval_minutes: float = 15,
+        sales_interval_minutes: float = 15,
+        returns_interval_minutes: float = 30,
+        finance_interval_minutes: float = 60,
     ) -> None:
-        if interval_minutes <= 0:
-            raise ValueError("Stock sync interval must be positive")
-        self.session_factory = session_factory
-        self.cabinet_id = cabinet_id
-        self.source = source
-        self.interval_seconds = interval_minutes * 60
-        self._runner = runner
-        self._run_lock = asyncio.Lock()
-        self._task: asyncio.Task[None] | None = None
+        if set(jobs) != set(JOB_ORDER):
+            raise ValueError("Data sync scheduler requires stocks, postings, returns and finance jobs")
+        intervals = {
+            "stocks": stock_interval_minutes,
+            "postings": sales_interval_minutes,
+            "returns": returns_interval_minutes,
+            "finance": finance_interval_minutes,
+        }
+        if any(value <= 0 for value in intervals.values()):
+            raise ValueError("Data sync intervals must be positive")
+        self.jobs = jobs
+        self.interval_seconds = {name: value * 60 for name, value in intervals.items()}
+        self._run_locks = {name: asyncio.Lock() for name in JOB_ORDER}
+        self._tasks: dict[str, asyncio.Task[None]] = {}
 
     @property
     def running(self) -> bool:
-        return self._task is not None and not self._task.done()
+        return bool(self._tasks) and all(not task.done() for task in self._tasks.values())
 
     async def start(self, _application: Any = None) -> None:
         if self.running:
             return
-        await self.run_once()
-        self._task = asyncio.create_task(self._periodic_loop(), name="stock-sync-scheduler")
+        for name in JOB_ORDER:
+            await self.run_once(name)
+        self._tasks = {
+            name: asyncio.create_task(self._periodic_loop(name), name=f"{name}-sync-scheduler")
+            for name in JOB_ORDER
+        }
 
     async def stop(self, _application: Any = None) -> None:
-        task = self._task
-        self._task = None
-        if task is None:
+        tasks = tuple(self._tasks.values())
+        self._tasks = {}
+        if not tasks:
             return
-        task.cancel()
+        for task in tasks:
+            task.cancel()
         with suppress(asyncio.CancelledError):
-            await task
+            await asyncio.gather(*tasks)
 
-    async def run_once(self) -> bool:
-        if self._run_lock.locked():
-            logger.info("Stock sync skipped because another run is active")
+    async def run_once(self, name: str) -> bool:
+        if name not in self.jobs:
+            raise ValueError(f"Unknown sync job: {name}")
+        lock = self._run_locks[name]
+        if lock.locked():
+            logger.info("%s sync skipped because another run is active", name)
             return False
-        async with self._run_lock:
+        async with lock:
             try:
-                result = await self._runner(self.session_factory, self.cabinet_id, self.source)
+                await self.jobs[name]()
             except Exception:
-                logger.exception("Automatic stock sync failed")
+                logger.exception("Automatic %s sync failed", name)
                 return False
-            logger.info("Automatic stock sync completed: %s rows", result.rows_received)
+            logger.info("Automatic %s sync completed", name)
             return True
 
-    async def _periodic_loop(self) -> None:
+    async def _periodic_loop(self, name: str) -> None:
         while True:
-            await asyncio.sleep(self.interval_seconds)
-            await self.run_once()
+            await asyncio.sleep(self.interval_seconds[name])
+            await self.run_once(name)

@@ -1,11 +1,17 @@
+from datetime import date, timedelta
+
 from .config import Settings
 from .db.models import Cabinet
 from .db.session import create_database
 from .logging_config import configure_logging
 from .ozon.client import OzonClient
 from .services.cabinet_analytics import calculate_cabinet_analytics
-from .services.stock_scheduler import StockSyncScheduler
+from .services.finance_accrual_sync import FinanceAccrualSource, sync_finance_accruals
+from .services.posting_sync import PostingSource, sync_postings
+from .services.return_sync import ReturnSource, sync_returns
+from .services.stock_scheduler import DataSyncScheduler
 from .services.stock_sync import StockCatalogSource
+from .services.stock_sync import sync_stocks
 from .telegram.bot import build_application
 from sqlalchemy import select
 
@@ -34,15 +40,37 @@ def main() -> None:
                 raise RuntimeError("No active cabinet configured")
             return calculate_cabinet_analytics(session, cabinet.id, period_start, period_end)
 
-    stock_scheduler = None
+    data_sync_scheduler = None
     if settings.ozon_configured:
-        stock_scheduler = StockSyncScheduler(
-            database.session_factory,
-            active_cabinet.id,
-            StockCatalogSource(OzonClient(settings.ozon_client_id, settings.ozon_api_key)),
-            interval_minutes=settings.stock_sync_interval_minutes,
+        client = OzonClient(settings.ozon_client_id, settings.ozon_api_key)
+        stock_source = StockCatalogSource(client)
+        posting_source = PostingSource(client)
+        return_source = ReturnSource(client)
+        finance_source = FinanceAccrualSource(client)
+
+        async def stock_job():
+            return await sync_stocks(database.session_factory, active_cabinet.id, stock_source)
+
+        async def posting_job():
+            end = date.today()
+            return await sync_postings(database.session_factory, active_cabinet.id, posting_source, end - timedelta(days=29), end)
+
+        async def return_job():
+            end = date.today()
+            return await sync_returns(database.session_factory, active_cabinet.id, return_source, end - timedelta(days=29), end)
+
+        async def finance_job():
+            end = date.today()
+            return await sync_finance_accruals(database.session_factory, active_cabinet.id, finance_source, end - timedelta(days=6), end)
+
+        data_sync_scheduler = DataSyncScheduler(
+            {"stocks": stock_job, "postings": posting_job, "returns": return_job, "finance": finance_job},
+            stock_interval_minutes=settings.stock_sync_interval_minutes,
+            sales_interval_minutes=settings.sales_sync_interval_minutes,
+            returns_interval_minutes=settings.returns_sync_interval_minutes,
+            finance_interval_minutes=settings.finance_sync_interval_minutes,
         )
-    build_application(settings, analytics_provider, stock_scheduler).run_polling()
+    build_application(settings, analytics_provider, data_sync_scheduler).run_polling()
 
 
 if __name__ == "__main__":
