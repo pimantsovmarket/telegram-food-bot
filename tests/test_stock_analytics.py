@@ -38,6 +38,7 @@ def analytics_database(tmp_path: Path):
         session.add_all(
             [
                 Stock(cabinet_id=cabinet_id, product_id=101, offer_id="A", stock_type="fbo", sku=1, present=22, reserved=2),
+                Stock(cabinet_id=cabinet_id, product_id=101, offer_id="A", stock_type="fbs", sku=1, present=5, reserved=1),
                 Stock(cabinet_id=cabinet_id, product_id=102, offer_id="B", stock_type="fbo", sku=2, present=10, reserved=0),
                 Stock(cabinet_id=cabinet_id, product_id=103, offer_id="C", stock_type="fbo", sku=3, present=0, reserved=0),
             ]
@@ -80,14 +81,15 @@ def test_calculates_7_14_and_30_day_windows(tmp_path):
         with database.session_factory() as session:
             result = calculate_stock_analytics(session, cabinet_id, as_of=AS_OF)[0]
         assert (result.offer_id, result.sku, result.size, result.color) == ("A", 1, "42", "burgundy")
-        assert result.current_stock == 20
+        assert result.current_stock == 24
+        assert (result.current_stock_fbo, result.current_stock_fbs, result.current_stock_total) == (20, 4, 24)
         assert (result.delivered_units_7d, result.delivered_units_14d, result.delivered_units_30d) == (7, 14, 29)
         assert result.avg_sales_per_day_7d == pytest.approx(1)
         assert result.avg_sales_per_day_14d == pytest.approx(1)
         assert result.avg_sales_per_day_30d == pytest.approx(29 / 30)
-        assert result.days_cover_7d == pytest.approx(20)
-        assert result.days_cover_14d == pytest.approx(20)
-        assert result.days_cover_30d == pytest.approx(20 / (29 / 30))
+        assert result.days_cover_7d == pytest.approx(24)
+        assert result.days_cover_14d == pytest.approx(24)
+        assert result.days_cover_30d == pytest.approx(24 / (29 / 30))
     finally:
         database.dispose()
 
@@ -98,6 +100,7 @@ def test_zero_sales_returns_null_days_cover(tmp_path):
         with database.session_factory() as session:
             result = calculate_stock_analytics(session, cabinet_id, as_of=AS_OF)[1]
         assert result.current_stock == 10
+        assert (result.current_stock_fbo, result.current_stock_fbs, result.current_stock_total) == (10, 0, 10)
         assert result.delivered_units_7d == result.delivered_units_14d == result.delivered_units_30d == 0
         assert result.avg_sales_per_day_7d == result.avg_sales_per_day_14d == result.avg_sales_per_day_30d == 0
         assert result.days_cover_7d is result.days_cover_14d is result.days_cover_30d is None

@@ -17,6 +17,9 @@ class ProductStockAnalytics:
     size: str | None
     color: str | None
     current_stock: int
+    current_stock_fbo: int
+    current_stock_fbs: int
+    current_stock_total: int
     delivered_units_7d: int
     delivered_units_14d: int
     delivered_units_30d: int
@@ -56,6 +59,8 @@ def calculate_stock_analytics(
             Stock.cabinet_id.label("cabinet_id"),
             Stock.product_id.label("product_id"),
             func.sum(available_stock).label("current_stock"),
+            func.sum(case((func.lower(Stock.stock_type) == "fbo", available_stock), else_=0)).label("current_stock_fbo"),
+            func.sum(case((func.lower(Stock.stock_type) == "fbs", available_stock), else_=0)).label("current_stock_fbs"),
         )
         .where(Stock.cabinet_id == cabinet_id)
         .group_by(Stock.cabinet_id, Stock.product_id)
@@ -90,6 +95,8 @@ def calculate_stock_analytics(
             Product.size,
             Product.color,
             func.coalesce(stock_totals.c.current_stock, 0),
+            func.coalesce(stock_totals.c.current_stock_fbo, 0),
+            func.coalesce(stock_totals.c.current_stock_fbs, 0),
             func.coalesce(sales_totals.c.units_7d, 0),
             func.coalesce(sales_totals.c.units_14d, 0),
             func.coalesce(sales_totals.c.units_30d, 0),
@@ -109,8 +116,10 @@ def calculate_stock_analytics(
     )
 
     analytics = []
-    for product_id, offer_id, sku, size, color, current_stock, units_7d, units_14d, units_30d in session.execute(statement):
+    for product_id, offer_id, sku, size, color, current_stock, current_stock_fbo, current_stock_fbs, units_7d, units_14d, units_30d in session.execute(statement):
         current_stock = int(current_stock)
+        current_stock_fbo = int(current_stock_fbo)
+        current_stock_fbs = int(current_stock_fbs)
         units_7d = int(units_7d)
         units_14d = int(units_14d)
         units_30d = int(units_30d)
@@ -125,6 +134,9 @@ def calculate_stock_analytics(
                 size=size,
                 color=color,
                 current_stock=current_stock,
+                current_stock_fbo=current_stock_fbo,
+                current_stock_fbs=current_stock_fbs,
+                current_stock_total=current_stock,
                 delivered_units_7d=units_7d,
                 delivered_units_14d=units_14d,
                 delivered_units_30d=units_30d,
