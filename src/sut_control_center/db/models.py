@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, String, Text, UniqueConstraint, text
+from sqlalchemy import JSON, BigInteger, Boolean, CheckConstraint, Date, DateTime, ForeignKey, ForeignKeyConstraint, Index, Integer, Numeric, String, Text, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .base import Base
@@ -60,7 +61,7 @@ class Product(Base):
     product_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     offer_id: Mapped[str] = mapped_column(String(255), nullable=False)
     name: Mapped[str] = mapped_column(String(500), nullable=False)
-    sku: Mapped[int | None] = mapped_column(BigInteger)
+    sku: Mapped[int | None] = mapped_column(BigInteger, index=True)
     size: Mapped[str | None] = mapped_column(String(100))
     color: Mapped[str | None] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -183,3 +184,64 @@ class PostingItem(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
 
     posting: Mapped[Posting] = relationship(back_populates="items")
+
+
+class FinanceAccrualType(Base):
+    __tablename__ = "finance_accrual_types"
+
+    type_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+
+class FinanceAccrual(Base):
+    __tablename__ = "finance_accruals"
+    __table_args__ = (
+        Index("ix_finance_accruals_cabinet_date", "cabinet_id", "operation_date"),
+        Index("ix_finance_accruals_posting_number", "posting_number"),
+    )
+
+    accrual_id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    cabinet_id: Mapped[int] = mapped_column(ForeignKey("cabinets.id"), nullable=False)
+    operation_date: Mapped[date] = mapped_column(Date, nullable=False)
+    category: Mapped[str] = mapped_column(String(50), nullable=False)
+    posting_number: Mapped[str | None] = mapped_column(String(255))
+    total_amount: Mapped[Decimal] = mapped_column(Numeric(19, 6), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=utc_now, onupdate=utc_now)
+
+
+class FinanceAccrualItem(Base):
+    __tablename__ = "finance_accrual_items"
+    __table_args__ = (Index("ix_finance_accrual_items_accrual_sku", "accrual_id", "sku"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    accrual_id: Mapped[int] = mapped_column(ForeignKey("finance_accruals.accrual_id", ondelete="CASCADE"), nullable=False)
+    sku: Mapped[int | None] = mapped_column(BigInteger)
+    quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    seller_price: Mapped[Decimal | None] = mapped_column(Numeric(19, 6))
+    sale_price: Mapped[Decimal | None] = mapped_column(Numeric(19, 6))
+    sale_amount: Mapped[Decimal | None] = mapped_column(Numeric(19, 6))
+    sale_commission: Mapped[Decimal | None] = mapped_column(Numeric(19, 6))
+    commission: Mapped[Decimal | None] = mapped_column(Numeric(19, 6))
+    commission_ratio: Mapped[Decimal | None] = mapped_column(Numeric(19, 6))
+    coinvestment: Mapped[Decimal | None] = mapped_column(Numeric(19, 6))
+    bonus: Mapped[Decimal | None] = mapped_column(Numeric(19, 6))
+
+
+class FinanceAccrualComponent(Base):
+    __tablename__ = "finance_accrual_components"
+    __table_args__ = (
+        Index("ix_finance_accrual_components_accrual", "accrual_id"),
+        Index("ix_finance_accrual_components_type", "type_id"),
+        Index("ix_finance_accrual_components_sku", "sku"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    accrual_id: Mapped[int] = mapped_column(ForeignKey("finance_accruals.accrual_id", ondelete="CASCADE"), nullable=False)
+    sku: Mapped[int | None] = mapped_column(BigInteger)
+    type_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    amount: Mapped[Decimal] = mapped_column(Numeric(19, 6), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)

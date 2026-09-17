@@ -1,4 +1,6 @@
 from dataclasses import dataclass
+from datetime import date
+from decimal import Decimal
 from typing import Any
 
 
@@ -43,3 +45,44 @@ class OzonPosting:
     status: str
     event_at: str
     items: tuple[OzonPostingItem, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class OzonFinanceAccrualType:
+    type_id: int
+    name: str
+    description: str
+
+
+@dataclass(frozen=True, slots=True)
+class OzonFinanceAccrualItem:
+    sku: int | None
+    quantity: int
+    seller_price: Decimal | None = None
+    sale_price: Decimal | None = None
+    sale_amount: Decimal | None = None
+    sale_commission: Decimal | None = None
+    commission: Decimal | None = None
+    commission_ratio: Decimal | None = None
+    coinvestment: Decimal | None = None
+    bonus: Decimal | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class OzonFinanceAccrualComponent:
+    sku: int | None
+    type_id: int
+    amount: Decimal
+    currency: str
+
+
+@dataclass(frozen=True, slots=True)
+class OzonFinanceAccrual:
+    accrual_id: int
+    operation_date: date
+    category: str
+    posting_number: str | None
+    total_amount: Decimal
+    currency: str
+    items: tuple[OzonFinanceAccrualItem, ...]
+    components: tuple[OzonFinanceAccrualComponent, ...]

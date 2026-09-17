@@ -6,8 +6,22 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from ..ozon.models import OzonPosting, OzonProduct, OzonStock
-from .models import AppState, Cabinet, Posting, PostingItem, Product, ProductReplenishmentParameters, Stock, SyncRun, utc_now
+from ..ozon.models import OzonFinanceAccrual, OzonFinanceAccrualType, OzonPosting, OzonProduct, OzonStock
+from .models import (
+    AppState,
+    Cabinet,
+    FinanceAccrual,
+    FinanceAccrualComponent,
+    FinanceAccrualItem,
+    FinanceAccrualType,
+    Posting,
+    PostingItem,
+    Product,
+    ProductReplenishmentParameters,
+    Stock,
+    SyncRun,
+    utc_now,
+)
 
 
 class CabinetRepository:
@@ -287,3 +301,95 @@ class PostingRepository:
     def list_for_cabinet(self, cabinet_id: int) -> list[Posting]:
         statement = select(Posting).where(Posting.cabinet_id == cabinet_id).order_by(Posting.event_at, Posting.id)
         return list(self.session.scalars(statement))
+
+
+class FinanceAccrualTypeRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def upsert_many(self, items: list[OzonFinanceAccrualType]) -> int:
+        type_ids = [item.type_id for item in items]
+        existing = {}
+        if type_ids:
+            existing = {
+                item.type_id: item
+                for item in self.session.scalars(
+                    select(FinanceAccrualType).where(FinanceAccrualType.type_id.in_(type_ids))
+                )
+            }
+        for source in items:
+            item = existing.get(source.type_id)
+            if item is None:
+                item = FinanceAccrualType(type_id=source.type_id)
+                self.session.add(item)
+            item.name = source.name
+            item.description = source.description
+            item.updated_at = utc_now()
+        self.session.flush()
+        return len(items)
+
+
+class FinanceAccrualRepository:
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def upsert_many(self, cabinet_id: int, items: list[OzonFinanceAccrual]) -> tuple[int, int, int]:
+        accrual_ids = [item.accrual_id for item in items]
+        existing = {}
+        if accrual_ids:
+            existing = {
+                item.accrual_id: item
+                for item in self.session.scalars(
+                    select(FinanceAccrual).where(FinanceAccrual.accrual_id.in_(accrual_ids))
+                )
+            }
+            self.session.execute(delete(FinanceAccrualItem).where(FinanceAccrualItem.accrual_id.in_(accrual_ids)))
+            self.session.execute(delete(FinanceAccrualComponent).where(FinanceAccrualComponent.accrual_id.in_(accrual_ids)))
+
+        item_count = 0
+        component_count = 0
+        for source in items:
+            accrual = existing.get(source.accrual_id)
+            if accrual is None:
+                accrual = FinanceAccrual(accrual_id=source.accrual_id, cabinet_id=cabinet_id)
+                self.session.add(accrual)
+            elif accrual.cabinet_id != cabinet_id:
+                raise ValueError("Finance accrual belongs to another cabinet")
+            accrual.operation_date = source.operation_date
+            accrual.category = source.category
+            accrual.posting_number = source.posting_number
+            accrual.total_amount = source.total_amount
+            accrual.currency = source.currency
+            accrual.updated_at = utc_now()
+            self.session.flush()
+
+            for source_item in source.items:
+                self.session.add(
+                    FinanceAccrualItem(
+                        accrual_id=source.accrual_id,
+                        sku=source_item.sku,
+                        quantity=source_item.quantity,
+                        seller_price=source_item.seller_price,
+                        sale_price=source_item.sale_price,
+                        sale_amount=source_item.sale_amount,
+                        sale_commission=source_item.sale_commission,
+                        commission=source_item.commission,
+                        commission_ratio=source_item.commission_ratio,
+                        coinvestment=source_item.coinvestment,
+                        bonus=source_item.bonus,
+                    )
+                )
+                item_count += 1
+            for source_component in source.components:
+                self.session.add(
+                    FinanceAccrualComponent(
+                        accrual_id=source.accrual_id,
+                        sku=source_component.sku,
+                        type_id=source_component.type_id,
+                        amount=source_component.amount,
+                        currency=source_component.currency,
+                    )
+                )
+                component_count += 1
+        self.session.flush()
+        return len(items), item_count, component_count
