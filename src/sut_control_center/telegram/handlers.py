@@ -8,6 +8,7 @@ from telegram.ext import ContextTypes
 
 from ..config import Settings
 from ..services.cabinet_analytics import CabinetAnalytics
+from ..services.data_freshness import DataFreshnessReport, format_freshness_warning
 from .security import is_owner
 
 
@@ -15,6 +16,7 @@ UNAUTHORIZED = "Access denied."
 STATUS_ERROR = "Не удалось сформировать отчёт. Попробуйте позже."
 logger = logging.getLogger(__name__)
 AnalyticsProvider = Callable[[date, date], CabinetAnalytics]
+FreshnessProvider = Callable[[], DataFreshnessReport]
 
 
 def _format_money(value: Decimal) -> str:
@@ -80,4 +82,14 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.exception("Cabinet analytics status failed")
         await update.message.reply_text(STATUS_ERROR)
         return
-    await update.message.reply_text(format_status(report))
+    text = format_status(report)
+    freshness_provider: FreshnessProvider | None = context.application.bot_data.get("freshness_provider")
+    if freshness_provider is not None:
+        try:
+            warning = format_freshness_warning(freshness_provider())
+        except Exception:
+            logger.exception("Data freshness status failed")
+            warning = "⚠️ Данные требуют внимания\n• Актуальность данных: проверить не удалось"
+        if warning:
+            text = f"{text}\n\n{warning}"
+    await update.message.reply_text(text)

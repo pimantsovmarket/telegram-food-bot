@@ -2,13 +2,14 @@ from telegram.ext import Application, CommandHandler
 
 from ..config import Settings
 from ..services.stock_scheduler import DataSyncScheduler
-from .handlers import AnalyticsProvider, help_command, start, status
+from .handlers import AnalyticsProvider, FreshnessProvider, help_command, start, status
 
 
 def build_application(
     settings: Settings,
     analytics_provider: AnalyticsProvider | None = None,
     data_sync_scheduler: DataSyncScheduler | None = None,
+    freshness_provider: FreshnessProvider | None = None,
 ) -> Application:
     if not settings.telegram_bot_token:
         raise ValueError("TELEGRAM_BOT_TOKEN is not configured")
@@ -18,6 +19,7 @@ def build_application(
     application = builder.build()
     application.bot_data["settings"] = settings
     application.bot_data["analytics_provider"] = analytics_provider
+    application.bot_data["freshness_provider"] = freshness_provider
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("status", status))

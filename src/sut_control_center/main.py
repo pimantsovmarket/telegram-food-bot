@@ -6,6 +6,7 @@ from .db.session import create_database
 from .logging_config import configure_logging
 from .ozon.client import OzonClient
 from .services.cabinet_analytics import calculate_cabinet_analytics
+from .services.data_freshness import calculate_data_freshness
 from .services.finance_accrual_sync import FinanceAccrualSource, sync_finance_accruals
 from .services.posting_sync import PostingSource, sync_postings
 from .services.return_sync import ReturnSource, sync_returns
@@ -40,6 +41,19 @@ def main() -> None:
                 raise RuntimeError("No active cabinet configured")
             return calculate_cabinet_analytics(session, cabinet.id, period_start, period_end)
 
+    def freshness_provider():
+        with database.session_factory() as session:
+            return calculate_data_freshness(
+                session,
+                active_cabinet.id,
+                {
+                    "stocks": settings.stock_stale_after_minutes,
+                    "sales": settings.sales_stale_after_minutes,
+                    "returns": settings.returns_stale_after_minutes,
+                    "finance": settings.finance_stale_after_minutes,
+                },
+            )
+
     data_sync_scheduler = None
     if settings.ozon_configured:
         client = OzonClient(settings.ozon_client_id, settings.ozon_api_key)
@@ -70,7 +84,12 @@ def main() -> None:
             returns_interval_minutes=settings.returns_sync_interval_minutes,
             finance_interval_minutes=settings.finance_sync_interval_minutes,
         )
-    build_application(settings, analytics_provider, data_sync_scheduler).run_polling()
+    build_application(
+        settings,
+        analytics_provider,
+        data_sync_scheduler,
+        freshness_provider,
+    ).run_polling()
 
 
 if __name__ == "__main__":

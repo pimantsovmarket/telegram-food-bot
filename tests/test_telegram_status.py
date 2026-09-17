@@ -1,10 +1,11 @@
 import asyncio
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from types import SimpleNamespace
 
 from sut_control_center.config import Settings
 from sut_control_center.services.cabinet_analytics import CabinetAnalytics
+from sut_control_center.services.data_freshness import DataFreshnessReport, FreshnessState, SourceFreshness
 from sut_control_center.telegram.handlers import STATUS_ERROR, format_status, status
 
 
@@ -37,9 +38,9 @@ class Message:
         self.replies.append(value)
 
 
-def context(provider):
+def context(provider, freshness_provider=None):
     settings = Settings("token", frozenset({42}), "", "", "sqlite:///db")
-    return SimpleNamespace(application=SimpleNamespace(bot_data={"settings": settings, "analytics_provider": provider}))
+    return SimpleNamespace(application=SimpleNamespace(bot_data={"settings": settings, "analytics_provider": provider, "freshness_provider": freshness_provider}))
 
 
 def update(user_id):
@@ -97,3 +98,27 @@ def test_status_hides_internal_errors():
     asyncio.run(status(request, context(provider)))
     assert request.message.replies == [STATUS_ERROR]
     assert "secret" not in request.message.replies[0]
+
+
+def test_status_has_no_freshness_block_when_all_sources_are_fresh():
+    fresh = DataFreshnessReport(
+        1,
+        tuple(SourceFreshness(name, FreshnessState.FRESH, None, None, False) for name in ("stocks", "sales", "returns", "finance")),
+    )
+    request = update(42)
+    asyncio.run(status(request, context(lambda _start, _end: report(), lambda: fresh)))
+    assert "Данные требуют внимания" not in request.message.replies[0]
+
+
+def test_status_appends_warning_when_source_is_stale():
+    stale = DataFreshnessReport(
+        1,
+        (
+            SourceFreshness("stocks", FreshnessState.STALE, None, timedelta(hours=1, minutes=12), False),
+            *(SourceFreshness(name, FreshnessState.FRESH, None, None, False) for name in ("sales", "returns", "finance")),
+        ),
+    )
+    request = update(42)
+    asyncio.run(status(request, context(lambda _start, _end: report(), lambda: stale)))
+    assert "⚠️ Данные требуют внимания" in request.message.replies[0]
+    assert "Остатки: не обновлялись 1 ч 12 мин" in request.message.replies[0]
