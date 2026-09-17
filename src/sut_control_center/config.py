@@ -30,6 +30,7 @@ class Settings:
     ozon_api_key: str
     database_url: str
     log_level: str = "INFO"
+    stock_sync_interval_minutes: int = 15
 
     @classmethod
     def from_env(cls, *, load_env_file: bool = True) -> "Settings":
@@ -38,6 +39,12 @@ class Settings:
         level = os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO"
         if level not in {"CRITICAL", "ERROR", "WARNING", "INFO", "DEBUG"}:
             raise ConfigError("LOG_LEVEL is invalid")
+        try:
+            stock_sync_interval = int(os.getenv("STOCK_SYNC_INTERVAL_MINUTES", "15").strip() or "15")
+        except ValueError as exc:
+            raise ConfigError("STOCK_SYNC_INTERVAL_MINUTES must be an integer") from exc
+        if stock_sync_interval <= 0:
+            raise ConfigError("STOCK_SYNC_INTERVAL_MINUTES must be positive")
         return cls(
             telegram_bot_token=os.getenv("TELEGRAM_BOT_TOKEN", "").strip(),
             owner_telegram_ids=_owner_ids(os.getenv("OWNER_TELEGRAM_IDS", "")),
@@ -45,6 +52,7 @@ class Settings:
             ozon_api_key=os.getenv("OZON_API_KEY", "").strip(),
             database_url=os.getenv("DATABASE_URL", "").strip(),
             log_level=level,
+            stock_sync_interval_minutes=stock_sync_interval,
         )
 
     @property

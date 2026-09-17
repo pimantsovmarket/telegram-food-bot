@@ -4,16 +4,25 @@ from sut_control_center.config import ConfigError, Settings
 
 
 def test_config_loads_from_environment(monkeypatch):
-    values = {"TELEGRAM_BOT_TOKEN": "telegram-secret", "OWNER_TELEGRAM_IDS": "10, 20", "OZON_CLIENT_ID": "client-secret", "OZON_API_KEY": "api-secret", "DATABASE_URL": "sqlite:///sut.db", "LOG_LEVEL": "warning"}
+    values = {"TELEGRAM_BOT_TOKEN": "telegram-secret", "OWNER_TELEGRAM_IDS": "10, 20", "OZON_CLIENT_ID": "client-secret", "OZON_API_KEY": "api-secret", "DATABASE_URL": "sqlite:///sut.db", "LOG_LEVEL": "warning", "STOCK_SYNC_INTERVAL_MINUTES": "20"}
     for key, value in values.items():
         monkeypatch.setenv(key, value)
     settings = Settings.from_env(load_env_file=False)
     assert settings.owner_telegram_ids == frozenset({10, 20})
     assert settings.telegram_configured and settings.ozon_configured and settings.database_configured
     assert settings.log_level == "WARNING"
+    assert settings.stock_sync_interval_minutes == 20
 
 
 def test_config_rejects_invalid_owner_ids(monkeypatch):
     monkeypatch.setenv("OWNER_TELEGRAM_IDS", "owner")
     with pytest.raises(ConfigError, match="comma-separated integers"):
+        Settings.from_env(load_env_file=False)
+
+
+@pytest.mark.parametrize("value", ["0", "-1", "minutes"])
+def test_config_rejects_invalid_stock_sync_interval(monkeypatch, value):
+    monkeypatch.setenv("OWNER_TELEGRAM_IDS", "42")
+    monkeypatch.setenv("STOCK_SYNC_INTERVAL_MINUTES", value)
+    with pytest.raises(ConfigError, match="STOCK_SYNC_INTERVAL_MINUTES"):
         Settings.from_env(load_env_file=False)

@@ -1,17 +1,23 @@
 from telegram.ext import Application, CommandHandler
 
 from ..config import Settings
-from ..health import DatabaseProbe, OzonProbe
-from .handlers import help_command, start, status
+from ..services.stock_scheduler import StockSyncScheduler
+from .handlers import AnalyticsProvider, help_command, start, status
 
 
-def build_application(settings: Settings, ozon_probe: OzonProbe | None = None, database_probe: DatabaseProbe | None = None) -> Application:
+def build_application(
+    settings: Settings,
+    analytics_provider: AnalyticsProvider | None = None,
+    stock_scheduler: StockSyncScheduler | None = None,
+) -> Application:
     if not settings.telegram_bot_token:
         raise ValueError("TELEGRAM_BOT_TOKEN is not configured")
-    application = Application.builder().token(settings.telegram_bot_token).build()
+    builder = Application.builder().token(settings.telegram_bot_token)
+    if stock_scheduler is not None:
+        builder = builder.post_init(stock_scheduler.start).post_shutdown(stock_scheduler.stop)
+    application = builder.build()
     application.bot_data["settings"] = settings
-    application.bot_data["ozon_probe"] = ozon_probe
-    application.bot_data["database_probe"] = database_probe
+    application.bot_data["analytics_provider"] = analytics_provider
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(CommandHandler("status", status))

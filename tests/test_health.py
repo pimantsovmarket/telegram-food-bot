@@ -20,6 +20,6 @@ def test_healthcheck_reports_foundation_status():
 
 
 def test_telegram_bootstrap_registers_minimal_commands():
-    application = build_application(settings())
+    application = build_application(settings(), lambda _start, _end: None)
     commands = {command for group in application.handlers.values() for handler in group for command in getattr(handler, "commands", set())}
     assert commands == {"start", "help", "status"}
